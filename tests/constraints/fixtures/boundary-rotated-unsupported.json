@@ -1,0 +1,12 @@
+{
+  "name": "boundary-10 rotated-unsupported",
+  "spec": {
+    "horizontal": "min",
+    "vertical": "min",
+    "transform": { "rotated": true },
+    "base": {
+      "horizontal": { "parent": 1000, "pos": 100, "size": 200 },
+      "vertical": { "parent": 800, "pos": 100, "size": 200 }
+    }
+  }
+}

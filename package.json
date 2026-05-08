@@ -1,0 +1,27 @@
+{
+  "name": "figma2gameui",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "build": "vite build",
+    "watch": "vite build --watch",
+    "test": "vitest run",
+    "spike:atlas-browser-probe": "esbuild src/pipeline/atlas/__spike__/browser-bundle-probe.ts --bundle --platform=browser --format=esm --outfile=dist/spike-atlas-browser-probe.mjs"
+  },
+  "devDependencies": {
+    "@figma/plugin-typings": "^1.109.0",
+    "@vitejs/plugin-vue": "^6.0.6",
+    "esbuild": "^0.24.2",
+    "typescript": "^5.7.3",
+    "vite": "^6.3.5",
+    "vite-plugin-singlefile": "^2.3.0",
+    "vitest": "^2.1.9"
+  },
+  "dependencies": {
+    "ant-design-vue": "4.2.6",
+    "fast-png": "^8.0.0",
+    "jszip": "^3.10.1",
+    "maxrects-packer": "^2.7.3",
+    "vue": "^3.5.32"
+  }
+}

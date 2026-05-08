@@ -1,0 +1,17 @@
+{
+  "name": "boundary-02 stretch-threshold",
+  "spec": {
+    "horizontal": "stretch",
+    "vertical": "stretch",
+    "base": {
+      "horizontal": { "parent": 1000, "pos": 400, "size": 200 },
+      "vertical": { "parent": 800, "pos": 300, "size": 100 }
+    },
+    "policy": { "rounding": "half-pixel" }
+  },
+  "sampleSizes": [
+    { "w": 601, "h": 401 },
+    { "w": 600, "h": 400 },
+    { "w": 599, "h": 399 }
+  ]
+}
