@@ -11,8 +11,17 @@ import { CocosCreator3Emitter } from './domain/emitters/cocos3/index';
 import { CocosCreator2Emitter } from './domain/emitters/cocos2';
 import { UnityEmitter } from './domain/emitters/unity';
 import { buildFrameTreeRoots } from './domain/discovery/frameTree';
-import { collectFontKeysFromExportSubtreesInFrames } from './domain/discovery/fontScan';
-import { resolveFramesByIds } from './domain/discovery/selection';
+import {
+  buildFontRegistryFromExportFrames,
+  expandFontMapByAliases,
+  expandFontRecordByAliases,
+  remapFontRecord,
+} from './domain/discovery/fontScan';
+import {
+  buildNoFramesResolvedMessage,
+  resolveFramesByIds,
+  resolveFramesByIdsDetailed,
+} from './domain/discovery/selection';
 import { validateAssetsRelativeRoot } from './shared/pathValidation';
 import type { ExportSettings } from './pipeline/context';
 import { LOCALE_STORAGE_KEY } from './ui/i18n/constants';
@@ -39,8 +48,8 @@ function postSettingsState(): void {
       prefabRel: settings.loadPrefabRel(),
       textureRel: settings.loadTextureRel(),
       fontRel: settings.loadFontRel(),
-      fontMap: settings.loadFontMap(),
-      fontUuidMap: settings.loadFontUuidMap(),
+      fontMap: remapFontRecord(settings.loadFontMap()),
+      fontUuidMap: remapFontRecord(settings.loadFontUuidMap()),
       attachDebugIr: settings.loadAttachDebugIr(),
       textureSubdirByPrimaryGroup: settings.loadTextureSubdirByPrimaryGroup(),
       pathDetailsExpanded: settings.loadPathDetailsExpanded(),
@@ -70,8 +79,8 @@ function postFrameTreeMessage(): void {
 
 function postFontKeys(): void {
   const frames = resolveFramesByIds(settings.loadExportFrameIds());
-  const keys = collectFontKeysFromExportSubtreesInFrames(frames);
-  figma.ui.postMessage({ type: 'FONT_KEYS_RESPONSE', payload: { keys } });
+  const registry = buildFontRegistryFromExportFrames(frames);
+  figma.ui.postMessage({ type: 'FONT_KEYS_RESPONSE', payload: { keys: registry.keys } });
 }
 
 function isLikelyUuid(value: string): boolean {
@@ -103,18 +112,39 @@ function postUiLocaleState(preference: UiLocalePreference): void {
   figma.ui.postMessage({ type: 'UI_LOCALE_STATE', payload: { preference } });
 }
 
-function postDryRunResult(): void {
+function parseFrameIdsFromPayload(raw: unknown): string[] | null {
+  if (!Array.isArray(raw)) {
+    return null;
+  }
+  return raw.filter((x): x is string => typeof x === 'string');
+}
+
+function persistExportFrameIds(ids: string[]): void {
+  settings.saveExportFrameIds(ids);
+}
+
+function loadExportFrameIdsPreferPayload(payloadIds: string[] | null): string[] {
+  if (payloadIds !== null) {
+    persistExportFrameIds(payloadIds);
+    return payloadIds;
+  }
+  return settings.loadExportFrameIds();
+}
+
+function postDryRunResult(frameIdsOverride?: readonly string[]): void {
   const report = new ReportCollector();
-  const frames = resolveFramesByIds(settings.loadExportFrameIds());
-  if (frames.length === 0) {
-    report.add('error', '请在左侧勾选至少一个要导出的 Frame。');
+  const ids =
+    frameIdsOverride !== undefined ? [...frameIdsOverride] : settings.loadExportFrameIds();
+  const resolved = resolveFramesByIdsDetailed(ids);
+  if (resolved.frames.length === 0) {
+    report.add('error', buildNoFramesResolvedMessage(resolved));
     figma.ui.postMessage({
       type: 'EXPORT_RESULT',
       payload: { ok: false, report: report.sortForDisplay(), files: [], dryRun: true },
     });
     return;
   }
-  report.add('info', `已勾选 ${frames.length} 个 Frame。`);
+  report.add('info', `已勾选 ${resolved.frames.length} 个 Frame。`);
 
   const includePrefabs = settings.loadIncludePrefabs();
   const includeTextures = settings.loadIncludeTextures();
@@ -124,14 +154,15 @@ function postDryRunResult(): void {
   }
 
   if (includeFonts) {
-    const usedKeys = collectFontKeysFromExportSubtreesInFrames(frames);
-    const fontMap = settings.loadFontMap();
+    const registry = buildFontRegistryFromExportFrames(resolved.frames);
+    const usedKeys = registry.keys;
+    const fontMap = remapFontRecord(settings.loadFontMap());
     for (const key of usedKeys) {
       if (!fontMap[key] || fontMap[key].trim() === '') {
         report.add('error', `缺少字体文件映射（TTF）：${key}`);
       }
     }
-    const uuidMap = settings.loadFontUuidMap();
+    const uuidMap = remapFontRecord(settings.loadFontUuidMap());
     for (const [key, value] of Object.entries(uuidMap)) {
       const v = value.trim();
       if (v !== '' && !isLikelyUuid(v)) {
@@ -142,13 +173,21 @@ function postDryRunResult(): void {
 
   figma.ui.postMessage({
     type: 'EXPORT_RESULT',
-    payload: { ok: true, report: report.sortForDisplay(), files: [], dryRun: true },
+    payload: {
+      ok: !report.hasErrors(),
+      report: report.sortForDisplay(),
+      files: [],
+      dryRun: true,
+    },
   });
 }
 
 type ExportFontFileWire = { fileName: string; data: number[] };
 
-async function handleExport(payload?: { fontFiles?: Record<string, ExportFontFileWire> }): Promise<void> {
+async function handleExport(payload?: {
+  fontFiles?: Record<string, ExportFontFileWire>;
+  selectedFrameIds?: unknown[];
+}): Promise<void> {
   const fontFiles = new Map<string, { fileName: string; bytes: Uint8Array }>();
   if (payload?.fontFiles) {
     for (const [key, file] of Object.entries(payload.fontFiles)) {
@@ -158,12 +197,18 @@ async function handleExport(payload?: { fontFiles?: Record<string, ExportFontFil
     }
   }
 
-  const fontUuidMap = settings.loadFontUuidMap();
+  const frameIdsForFonts = loadExportFrameIdsPreferPayload(parseFrameIdsFromPayload(payload?.selectedFrameIds));
+  const fontRegistry = buildFontRegistryFromExportFrames(resolveFramesByIds(frameIdsForFonts));
+  const fontUuidMap = expandFontRecordByAliases(
+    remapFontRecord(settings.loadFontUuidMap()),
+    fontRegistry.aliasToCanonical,
+  );
   const fontUuidOverrides = new Map<string, string>();
   for (const [k, v] of Object.entries(fontUuidMap)) {
     const uuid = (v || '').trim();
     if (uuid !== '' && isLikelyUuid(uuid)) fontUuidOverrides.set(k, uuid);
   }
+  const expandedFontFiles = expandFontMapByAliases(fontFiles, fontRegistry.aliasToCanonical);
 
   const exportSettings: ExportSettings = {
     engineId: settings.loadEngineId(),
@@ -185,7 +230,7 @@ async function handleExport(payload?: { fontFiles?: Record<string, ExportFontFil
     atlasMaxSide: settings.loadAtlasMaxSide(),
     atlasLargeSpriteAreaRatioThreshold: settings.loadAtlasLargeSpriteAreaRatio(),
     manualTextureGroupByExportNodeId: new Map(),
-    fontFiles,
+    fontFiles: expandedFontFiles,
     fontUuidOverrides,
     engineSpecific: {},
   };
@@ -194,8 +239,10 @@ async function handleExport(payload?: { fontFiles?: Record<string, ExportFontFil
     figma.ui.postMessage({ type: 'EXPORT_PROGRESS', payload: { label, ratio } });
   });
 
+  const frameIds = loadExportFrameIdsPreferPayload(parseFrameIdsFromPayload(payload?.selectedFrameIds));
+
   const result = await runExportPipeline(
-    settings.loadExportFrameIds(),
+    frameIds,
     exportSettings,
     { emitterRegistry, transformRegistry, featureGate },
     progress,
@@ -215,15 +262,19 @@ function handleSaveSettings(p: Record<string, unknown>): void {
 
     const clean: Record<string, string> = {};
     if (p.fontMap && typeof p.fontMap === 'object' && !Array.isArray(p.fontMap)) {
-      for (const [k, v] of Object.entries(p.fontMap as Record<string, unknown>)) { if (typeof v === 'string') clean[k] = v; }
+      for (const [k, v] of Object.entries(p.fontMap as Record<string, unknown>)) {
+        if (typeof v === 'string') clean[k] = v;
+      }
     }
-    settings.saveFontMap(clean);
+    settings.saveFontMap(remapFontRecord(clean));
 
     const cleanUuid: Record<string, string> = {};
     if (p.fontUuidMap && typeof p.fontUuidMap === 'object' && !Array.isArray(p.fontUuidMap)) {
-      for (const [k, v] of Object.entries(p.fontUuidMap as Record<string, unknown>)) { if (typeof v === 'string') cleanUuid[k] = v; }
+      for (const [k, v] of Object.entries(p.fontUuidMap as Record<string, unknown>)) {
+        if (typeof v === 'string') cleanUuid[k] = v;
+      }
     }
-    settings.saveFontUuidMap(cleanUuid);
+    settings.saveFontUuidMap(remapFontRecord(cleanUuid));
 
     settings.saveAttachDebugIr(Boolean(p.attachDebugIr));
     settings.saveIncludePrefabs(p.includePrefabs !== false);
@@ -318,9 +369,15 @@ router.on('FRAME_TREE_REQUEST', () => { postFrameTreeMessage(); });
 
 router.on('FONT_KEYS_REQUEST', () => { postFontKeys(); });
 
-router.on('EXPORT_REQUEST', (msg: { type: string; payload?: { fontFiles?: Record<string, ExportFontFileWire> } }) => {
-  void handleExport(msg.payload);
-});
+router.on(
+  'EXPORT_REQUEST',
+  (msg: {
+    type: string;
+    payload?: { fontFiles?: Record<string, ExportFontFileWire>; selectedFrameIds?: unknown[] };
+  }) => {
+    void handleExport(msg.payload);
+  },
+);
 
 router.on('SAVE_SETTINGS', (msg: { type: string; payload: Record<string, unknown> }) => {
   if (msg.payload && typeof msg.payload === 'object') handleSaveSettings(msg.payload);

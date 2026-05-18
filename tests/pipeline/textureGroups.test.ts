@@ -1,10 +1,12 @@
 import { describe, it, expect } from "vitest";
 import {
+  buildExportNodeAudit,
   buildTextureGroupsDocument,
   defaultFrameGroupId,
   exportNodeIdFromSpriteIr,
   parseNamingGroupFromChain,
   resolveGroupIdForExportNode,
+  resolveGroupIdForExportNodeDetailed,
   slugTextureGroupId,
 } from "../../src/pipeline/textureGroups";
 
@@ -78,9 +80,62 @@ describe("textureGroups", () => {
         },
       ],
     });
+    expect(doc.version).toBe(2);
     expect(doc.entries).toHaveLength(1);
     expect(doc.entries[0].groups).toEqual(["alpha", "zebra"]);
     expect(doc.entries[0].primaryGroup).toBe("alpha");
+    expect(doc.entries[0].references).toHaveLength(2);
+    expect(doc.entries[0].references[0].namingSourceRawTag).toBe("alpha");
+  });
+
+  it("resolveGroupIdForExportNodeDetailed records naming source layer", () => {
+    const d = resolveGroupIdForExportNodeDetailed({
+      exportNodeId: "1:1",
+      exportNodeName: "Row",
+      ancestorNamesUpToFrame: ["Root@g:shop"],
+      frameName: "F",
+      frameId: "0:100",
+    });
+    expect(d.resolution).toBe("naming");
+    expect(d.groupId).toBe("shop");
+    expect(d.namingSourceLayerName).toBe("Root@g:shop");
+    expect(d.namingSourceRawTag).toBe("shop");
+  });
+
+  it("buildExportNodeAudit marks label and missing texture", () => {
+    const assetRef = "export-1-2.png";
+    const audit = buildExportNodeAudit({
+      frames: [
+        {
+          frameId: "0:100",
+          frameName: "F",
+          rasterNodeIds: new Set(["1:2"]),
+          exportNodes: [
+            {
+              nodeId: "1:1",
+              nodeName: "Title",
+              nodeType: "TEXT",
+              role: "label",
+              rasterize: false,
+              ancestorNamesUpToFrame: [],
+            },
+            {
+              nodeId: "1:2",
+              nodeName: "Icon",
+              nodeType: "RECTANGLE",
+              role: "exportRoot",
+              rasterize: true,
+              ancestorNamesUpToFrame: [],
+            },
+          ],
+        },
+      ],
+      textureAssetRefs: new Set(),
+      spriteIdByExportNodeId: new Map([["1:2", "1:2:export"]]),
+    });
+    expect(audit.find((r) => r.nodeId === "1:1")?.status).toBe("skipped_not_rasterized");
+    expect(audit.find((r) => r.nodeId === "1:2")?.status).toBe("texture_missing");
+    expect(audit.find((r) => r.nodeId === "1:2")?.assetRef).toBe(assetRef);
   });
 
   it("buildTextureGroupsDocument passes manualByExportNodeId into resolution", () => {

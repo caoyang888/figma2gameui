@@ -12,6 +12,8 @@ export const messagesEn = {
   'validation.okTitle': 'Validation passed',
   'validation.badTitleGeneric': 'Validation failed',
   'validation.badDetailFromReport': 'See the first error in the report.',
+  'validation.badDetailNoEntries':
+    'Export finished with failure but no error lines were returned. Try re-selecting Frames on the left.',
   'validation.okDetail': 'You can run export.',
   'validation.exportBlockedTitle': 'Export prerequisites not met',
   'export.err.needKind':

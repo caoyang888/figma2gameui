@@ -1,5 +1,9 @@
-import { describe, it, expect } from 'vitest';
-import { filterFramesFromSelection } from '../src/domain/discovery/selection';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import {
+  buildNoFramesResolvedMessage,
+  filterFramesFromSelection,
+  resolveFramesByIdsDetailed,
+} from '../src/domain/discovery/selection';
 import { discoverExportNodesInFrame, filterTopLevelExportNodes } from '../src/domain/discovery/exportDiscovery';
 
 function mockFrame(overrides: Record<string, unknown> = {}): FrameNode {
@@ -11,6 +15,41 @@ function mockFrame(overrides: Record<string, unknown> = {}): FrameNode {
     ...overrides,
   } as unknown as FrameNode;
 }
+
+describe('resolveFramesByIdsDetailed', () => {
+  beforeEach(() => {
+    vi.stubGlobal('figma', {
+      getNodeById: (id: string) => {
+        if (id === 'f1') return { type: 'FRAME', id: 'f1' };
+        if (id === 'g1') return { type: 'GROUP', id: 'g1' };
+        return null;
+      },
+    });
+  });
+
+  it('collects frames, missing ids, and wrong types', () => {
+    const r = resolveFramesByIdsDetailed(['f1', 'missing', 'g1', 'f1']);
+    expect(r.frames.map((f) => f.id)).toEqual(['f1']);
+    expect(r.requestedIds).toEqual(['f1', 'missing', 'g1']);
+    expect(r.missingIds).toEqual(['missing']);
+    expect(r.wrongTypeIds).toEqual([{ id: 'g1', type: 'GROUP' }]);
+  });
+
+  it('buildNoFramesResolvedMessage explains missing and wrong-type ids', () => {
+    const r = resolveFramesByIdsDetailed(['missing', 'g1']);
+    const msg = buildNoFramesResolvedMessage(r);
+    expect(msg).toContain('已选 2 个目标');
+    expect(msg).toContain('成功解析 0 个 Frame');
+    expect(msg).toContain('missing');
+    expect(msg).toContain('g1(GROUP)');
+  });
+
+  it('buildNoFramesResolvedMessage for empty selection', () => {
+    expect(buildNoFramesResolvedMessage(resolveFramesByIdsDetailed([]))).toBe(
+      '请在左侧勾选至少一个要导出的 Frame。',
+    );
+  });
+});
 
 describe('filterFramesFromSelection', () => {
   it('returns only frames preserving order', () => {

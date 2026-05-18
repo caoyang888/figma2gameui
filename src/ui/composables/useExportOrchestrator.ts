@@ -43,13 +43,22 @@ interface Deps {
   fontManager: ReturnType<typeof useFontManager>
   engineSelector: ReturnType<typeof useEngineSelector>
   selectedFrameIds: Ref<string[]>
+  flushExportFrameIdsSync: (ids?: readonly string[]) => void
   sendToMain: (payload: unknown) => void
   /** 须由 `App.vue` 传入：同组件 setup 内 `inject` 读不到自身的 `provide`。 */
   i18n: I18nApi
 }
 
 export function useExportOrchestrator(deps: Deps) {
-  const { pathSettings, fontManager, engineSelector, selectedFrameIds, sendToMain, i18n } = deps
+  const {
+    pathSettings,
+    fontManager,
+    engineSelector,
+    selectedFrameIds,
+    flushExportFrameIdsSync,
+    sendToMain,
+    i18n,
+  } = deps
   const { t, effectiveLang } = i18n
 
   const exporting = ref(false)
@@ -58,7 +67,7 @@ export function useExportOrchestrator(deps: Deps) {
   const preflightReport = ref<ReportEntry[]>([])
   /** 最近一次完整导出（ZIP）的报告；有内容时报告面板优先显示本列表，避免被 dry-run 冲掉。 */
   const exportReport = ref<ReportEntry[]>([])
-  /** 仅显示用合并视图（导出优先）。 */
+  /** 显示用报告：dry-run 用 preflight；完整导出用 exportReport。 */
   const sortedReport = computed(() =>
     ReportCollector.sortEntries(
       exportReport.value.length > 0 ? exportReport.value : preflightReport.value,
@@ -113,7 +122,10 @@ export function useExportOrchestrator(deps: Deps) {
       validationBanner.value = {
         ok: false,
         title: t('validation.badTitleGeneric'),
-        detail: t('validation.badDetailFromReport'),
+        detail:
+          entries.length > 0
+            ? t('validation.badDetailFromReport')
+            : t('validation.badDetailNoEntries'),
       }
       return
     }
@@ -176,12 +188,18 @@ export function useExportOrchestrator(deps: Deps) {
       return
     }
 
+    const frameIds = [...selectedFrameIds.value]
+    flushExportFrameIdsSync(frameIds)
+
     exporting.value = true
     progressShowsOnlyPrepare.value = true
     progressLabel.value = t('export.progress.prepare')
     progressRatio.value = 0
     const fontFiles = await fontManager.buildFontFilesPayload()
-    sendToMain({ type: 'EXPORT_REQUEST', payload: { fontFiles } })
+    sendToMain({
+      type: 'EXPORT_REQUEST',
+      payload: { fontFiles, selectedFrameIds: frameIds },
+    })
   }
 
   function handleProgress(p: ExportProgressPayload): void {
@@ -205,6 +223,7 @@ export function useExportOrchestrator(deps: Deps) {
     progressShowsOnlyPrepare.value = false
     if (isDryRun) {
       preflightReport.value = nextReport
+      exportReport.value = []
       applyValidationFromReport(nextReport, ok)
       return
     }

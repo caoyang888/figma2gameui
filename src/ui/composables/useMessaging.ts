@@ -14,6 +14,7 @@ import type { useAtlasSettings } from './useAtlasSettings'
 import type { useEngineSelector } from './useEngineSelector'
 import type { useExportOrchestrator } from './useExportOrchestrator'
 import type { useSettingsPersistence } from './useSettingsPersistence'
+import type { useExportFrameSync } from './useExportFrameSync'
 import type { I18nApi } from '../i18n/injectionKey'
 
 interface Deps {
@@ -23,6 +24,7 @@ interface Deps {
   engineSelector: ReturnType<typeof useEngineSelector>
   exportOrch: ReturnType<typeof useExportOrchestrator>
   persistence: ReturnType<typeof useSettingsPersistence>
+  frameSync: ReturnType<typeof useExportFrameSync>
   frameTreeRoots: Ref<FrameTreeNodeWire[]>
   selectedFrameIds: Ref<string[]>
   devUiVisible: Ref<boolean>
@@ -44,7 +46,7 @@ function collectFrameWireIds(roots: readonly FrameTreeNodeWire[]): Set<string> {
 export function useMessaging(deps: Deps) {
   const {
     pathSettings, fontManager, atlasSettings, engineSelector,
-    exportOrch, persistence, frameTreeRoots, selectedFrameIds,
+    exportOrch, persistence, frameSync, frameTreeRoots, selectedFrameIds,
     devUiVisible, sendToMain, i18n,
   } = deps
 
@@ -63,23 +65,7 @@ export function useMessaging(deps: Deps) {
 
   let hasHydratedSettings = false
 
-  // ⚡ 性能核心修复：80ms 防抖，切断 IPC 往返风暴
-  let frameUpdateTimer: ReturnType<typeof setTimeout> | null = null
-  watch(
-    selectedFrameIds,
-    (ids) => {
-      if (persistence.suppressSave.value) return
-      if (frameUpdateTimer) clearTimeout(frameUpdateTimer)
-      frameUpdateTimer = setTimeout(() => {
-        frameUpdateTimer = null
-        sendToMain({
-          type: 'UPDATE_EXPORT_FRAMES',
-          payload: { selectedFrameIds: [...ids] },
-        })
-      }, 80)
-    },
-    { deep: true }
-  )
+  frameSync.bindFrameSelectionWatch(persistence.suppressSave)
 
   function onMessage(event: MessageEvent): void {
     const pm = event.data?.pluginMessage
@@ -137,7 +123,7 @@ export function useMessaging(deps: Deps) {
       const keys = Array.isArray((pm.payload as { keys?: unknown }).keys)
         ? (pm.payload as { keys: string[] }).keys
         : []
-      fontManager.fontKeys.value = keys
+      fontManager.setFontKeysFromMain(keys)
       return
     }
 
@@ -169,7 +155,6 @@ export function useMessaging(deps: Deps) {
   onUnmounted(() => {
     window.removeEventListener('message', onMessage)
     window.removeEventListener('keydown', onDevToggleKey)
-    if (frameUpdateTimer !== null) clearTimeout(frameUpdateTimer)
   })
 
   return { connectionLine }

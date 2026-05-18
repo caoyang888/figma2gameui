@@ -100,6 +100,7 @@ import { useFontManager } from './composables/useFontManager'
 import { useAtlasSettings, ATLAS_POT_INDEX_MAX } from './composables/useAtlasSettings'
 import { useEngineSelector } from './composables/useEngineSelector'
 import { useExportOrchestrator } from './composables/useExportOrchestrator'
+import { useExportFrameSync } from './composables/useExportFrameSync'
 import { useSettingsPersistence } from './composables/useSettingsPersistence'
 import { useMessaging } from './composables/useMessaging'
 import { useLocale } from './composables/useLocale'
@@ -122,11 +123,14 @@ const fontManager = useFontManager()
 const atlasSettings = useAtlasSettings()
 const engineSelector = useEngineSelector()
 
+const frameSync = useExportFrameSync({ selectedFrameIds, sendToMain })
+
 const exportOrch = useExportOrchestrator({
   pathSettings,
   fontManager,
   engineSelector,
   selectedFrameIds,
+  flushExportFrameIdsSync: frameSync.flushExportFrameIdsSync,
   sendToMain,
   i18n,
 })
@@ -148,6 +152,7 @@ const { connectionLine } = useMessaging({
   engineSelector,
   exportOrch,
   persistence,
+  frameSync,
   frameTreeRoots,
   selectedFrameIds,
   devUiVisible,

@@ -14,6 +14,8 @@ export const messagesZhHant = {
   'validation.okTitle': '驗證通過',
   'validation.badTitleGeneric': '驗證失敗',
   'validation.badDetailFromReport': '請查看報告中的第一則錯誤。',
+  'validation.badDetailNoEntries':
+    '匯出失敗但報告無錯誤條目。請重新勾選左側 Frame 後再試。',
   'validation.okDetail': '可以執行匯出。',
   'validation.exportBlockedTitle': '匯出前置條件未滿足',
   'export.err.needKind': '請至少選擇一種匯出類型（預製體／紋理／字型）。',

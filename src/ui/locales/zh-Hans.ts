@@ -14,6 +14,8 @@ export const messagesZhHans = {
   'validation.okTitle': '校验通过',
   'validation.badTitleGeneric': '校验失败',
   'validation.badDetailFromReport': '请查看报告中的第一条错误。',
+  'validation.badDetailNoEntries':
+    '导出失败但报告无错误条目。请重新勾选左侧 Frame 后再试。',
   'validation.okDetail': '可以运行导出。',
   'validation.exportBlockedTitle': '导出前置条件未满足',
   'export.err.needKind': '请至少选择一种导出类型（预制体 / 纹理 / 字体）。',

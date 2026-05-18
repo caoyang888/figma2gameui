@@ -87,7 +87,8 @@ function fontButtonText(key: string): string {
 }
 
 function fontButtonTitle(key: string): string {
-  return fontDisplayName(key)
+  const label = fontDisplayName(key)
+  return label === key ? label : `${label} (${key})`
 }
 
 function handleDrop(key: string, ev: DragEvent): void {

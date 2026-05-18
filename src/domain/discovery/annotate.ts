@@ -188,6 +188,31 @@ export function collectNodesToHideForExport(
  * Returns them grouped: exportRoots first (top-level), then childExports are reachable
  * via the tree but each gets its own PNG too.
  */
+/** 子树内所有带 Figma Export 设置的节点（含 hidden），供 debug/texture-groups 审计。 */
+export function collectExportTaggedNodesForAudit(
+  frame: FrameNode,
+  roles: ReadonlyMap<string, NodeRole>,
+): { node: SceneNode; role: string; rasterize: boolean }[] {
+  const out: { node: SceneNode; role: string; rasterize: boolean }[] = [];
+
+  function walk(node: SceneNode): void {
+    if (hasExportSettings(node)) {
+      const r = roles.get(node.id);
+      const roleName = r?.role ?? 'unknown';
+      const rasterize = r !== undefined && 'rasterize' in r ? r.rasterize : false;
+      out.push({ node, role: roleName, rasterize });
+    }
+    if (hasChildren(node)) {
+      for (const child of node.children) {
+        walk(child);
+      }
+    }
+  }
+
+  walk(frame as unknown as SceneNode);
+  return out;
+}
+
 export function collectRasterNodes(
   frame: FrameNode,
   roles: ReadonlyMap<string, NodeRole>,

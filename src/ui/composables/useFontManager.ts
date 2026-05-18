@@ -1,5 +1,11 @@
 // src/ui/composables/useFontManager.ts
 import { ref } from 'vue'
+import {
+  alignFontRecordToKeys,
+  collapseFontKeysByMappedAsset,
+  dedupeSortedFontKeys,
+  remapFontRecord,
+} from '../../domain/discovery/fontScan'
 import type { SettingsStatePayload, ExportFontFileWire } from '../../types/messages'
 
 export function useFontManager() {
@@ -19,6 +25,7 @@ export function useFontManager() {
     fontFileState.value = { ...fontFileState.value, [key]: f }
     fontMapState.value = { ...fontMapState.value, [key]: f.name }
     input.value = ''
+    applyFontKeysAndMaps(fontKeys.value)
     onFlush()
   }
 
@@ -27,7 +34,24 @@ export function useFontManager() {
     if (!file || !file.name.toLowerCase().endsWith('.ttf')) return
     fontFileState.value = { ...fontFileState.value, [key]: file }
     fontMapState.value = { ...fontMapState.value, [key]: file.name }
+    applyFontKeysAndMaps(fontKeys.value)
     onFlush()
+  }
+
+  function applyFontKeysAndMaps(scannedKeys: string[]): void {
+    const remappedMap = remapFontRecord(fontMapState.value)
+    const remappedUuid = remapFontRecord(fontUuidMapState.value)
+    const next = collapseFontKeysByMappedAsset(dedupeSortedFontKeys(scannedKeys), remappedMap, remappedUuid)
+    fontKeys.value = next
+    fontMapState.value = alignFontRecordToKeys(remappedMap, next)
+    fontUuidMapState.value = alignFontRecordToKeys(remappedUuid, next)
+    const preserved: Record<string, File> = {}
+    for (const [key, file] of Object.entries(fontFileState.value)) {
+      if (next.includes(key)) {
+        preserved[key] = file
+      }
+    }
+    fontFileState.value = preserved
   }
 
   async function buildFontFilesPayload(): Promise<Record<string, ExportFontFileWire>> {
@@ -44,14 +68,14 @@ export function useFontManager() {
   function hydrate(p: SettingsStatePayload, isFirstHydration: boolean): void {
     const map =
       p.fontMap && typeof p.fontMap === 'object' && !Array.isArray(p.fontMap)
-        ? p.fontMap
+        ? remapFontRecord(p.fontMap)
         : {}
     const fontUuidMap =
       p.fontUuidMap && typeof p.fontUuidMap === 'object' && !Array.isArray(p.fontUuidMap)
-        ? p.fontUuidMap
+        ? remapFontRecord(p.fontUuidMap)
         : {}
-    fontMapState.value = { ...map }
-    fontUuidMapState.value = { ...fontUuidMap }
+    fontMapState.value = remapFontRecord(map)
+    fontUuidMapState.value = remapFontRecord(fontUuidMap)
     if (isFirstHydration) {
       fontFileState.value = {}
     } else {
@@ -66,6 +90,10 @@ export function useFontManager() {
     }
   }
 
+  function setFontKeysFromMain(keys: string[]): void {
+    applyFontKeysAndMaps(keys)
+  }
+
   return {
     fontKeys,
     fontMapState,
@@ -75,5 +103,6 @@ export function useFontManager() {
     onFontDrop,
     buildFontFilesPayload,
     hydrate,
+    setFontKeysFromMain,
   }
 }

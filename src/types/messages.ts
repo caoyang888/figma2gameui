@@ -25,6 +25,8 @@ export type ExportRequestMessage = {
   type: 'EXPORT_REQUEST';
   payload?: {
     fontFiles?: Record<string, ExportFontFileWire>;
+    /** UI 当前勾选的 Frame id；主线程优先使用并持久化，避免防抖未同步。 */
+    selectedFrameIds?: string[];
   };
 };
 

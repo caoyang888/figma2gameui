@@ -5,9 +5,14 @@ import { packAtlases } from './atlas/packAtlases';
 import { ReportCollector } from './report';
 import { ProgressReporter } from './progress';
 import { validateAssetsRelativeRoot } from '../shared/pathValidation';
-import { resolveFramesByIds } from '../domain/discovery/selection';
+import { buildNoFramesResolvedMessage, resolveFramesByIdsDetailed } from '../domain/discovery/selection';
 import { tryExportPng } from '../domain/raster/raster';
-import { annotateExportTree, collectNodesToHideForExport, collectRasterNodes } from '../domain/discovery/annotate';
+import {
+  annotateExportTree,
+  collectExportTaggedNodesForAudit,
+  collectNodesToHideForExport,
+  collectRasterNodes,
+} from '../domain/discovery/annotate';
 import { buildFrameIr, exportAssetRefForNodeId } from '../domain/ir/builder';
 import { dedupeTexturesByBytesInPlace } from '../domain/ir/transforms/dedupeTextures';
 import { applyConstraintFitMetadata } from '../domain/constraints/apply';
@@ -21,6 +26,11 @@ import type { TexturePayload } from '../shared/hash';
 import { encodeUtf8 } from '../shared/utf8';
 import { readPngIhdrDimensions } from '../shared/pngDimensions';
 import {
+  buildExportDocumentTree,
+  serializeExportDocumentTree,
+} from './exportDocumentTree';
+import {
+  buildExportNodeAudit,
   buildTextureGroupsDocument,
   exportNodeIdFromSpriteIr,
   serializeTextureGroupsDocument,
@@ -183,10 +193,11 @@ export async function runExportPipeline(
 
     // Stage 2: resolve frames
     progress.report('检查导出目标…', 0.06);
-    const frames = resolveFramesByIds(frameIds);
+    const resolved = resolveFramesByIdsDetailed(frameIds);
+    const frames = resolved.frames;
 
     if (frames.length === 0) {
-      report.add('error', '请在左侧勾选至少一个要导出的 Frame。');
+      report.add('error', buildNoFramesResolvedMessage(resolved));
       return { ok: false, report: report.sortForDisplay(), files: filesToWire(outputFiles) };
     }
 
@@ -293,11 +304,8 @@ export async function runExportPipeline(
       await dedupeTexturesByBytesInPlace(ir, textureByAssetRef, report);
     }
 
-    if (irFrames.length === 0) {
-      return { ok: false, report: report.sortForDisplay(), files: filesToWire(outputFiles) };
-    }
-
     const textureAssetRefs = [...textureByAssetRef.keys()].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+    const textureAssetRefSet = new Set(textureAssetRefs);
     const spriteRowsByAssetRef = new Map<string, SpriteLikeIrRefRow[]>();
     for (const row of collectSpriteLikeRefsInIr(ir)) {
       const list = spriteRowsByAssetRef.get(row.assetRef) ?? [];
@@ -305,11 +313,78 @@ export async function runExportPipeline(
       spriteRowsByAssetRef.set(row.assetRef, list);
     }
 
+    const spriteIdByExportNodeId = new Map<string, string>();
+    for (const rows of spriteRowsByAssetRef.values()) {
+      for (const r of rows) {
+        spriteIdByExportNodeId.set(exportNodeIdFromSpriteIr(r.spriteId), r.spriteId);
+      }
+    }
+
     const manualTextureGroupByExportNodeId = settings.manualTextureGroupByExportNodeId ?? new Map<string, string>();
     const primaryGroupByAssetRef: Record<string, string> = {};
 
+    const auditFrames = frameAnnotations.map(({ frameNode, roles, rasterNodes }) => {
+      const rasterNodeIds = new Set(rasterNodes.map((n) => n.id));
+      const exportNodes = collectExportTaggedNodesForAudit(frameNode, roles).map(
+        ({ node, role, rasterize }) => ({
+          nodeId: node.id,
+          nodeName: node.name,
+          nodeType: node.type,
+          role,
+          rasterize,
+          ancestorNamesUpToFrame: collectAncestorNamesUpToFrame(node, frameNode.id),
+        }),
+      );
+      return {
+        frameId: frameNode.id,
+        frameName: frameNode.name,
+        exportNodes,
+        rasterNodeIds,
+      };
+    });
+
+    const exportNodeAudit = buildExportNodeAudit({
+      frames: auditFrames,
+      textureAssetRefs: textureAssetRefSet,
+      spriteIdByExportNodeId,
+      manualByExportNodeId: manualTextureGroupByExportNodeId,
+    });
+    const auditByNodeId = new Map(exportNodeAudit.map((row) => [row.nodeId, row]));
+
+    progress.report('生成文档结构调试 JSON…', 0.79);
+    const documentTree = buildExportDocumentTree({
+      generatedAt: ir.generatedAt,
+      exportFrames: frameAnnotations.map(({ frameNode, roles, rasterNodes }) => ({
+        frameNode,
+        roles,
+        rasterNodeIds: new Set(rasterNodes.map((n) => n.id)),
+      })),
+      auditByNodeId,
+      textureAssetRefs: textureAssetRefSet,
+    });
+    outputFiles.push({
+      path: `assets/${exportRoot}/debug/document-tree.json`,
+      data: serializeExportDocumentTree(documentTree),
+    });
+
+    if (irFrames.length === 0) {
+      return { ok: false, report: report.sortForDisplay(), files: filesToWire(outputFiles) };
+    }
+
     if (textureByAssetRef.size > 0) {
       const firstFrame = ir.frames[0];
+      const textureMetaByAssetRef = new Map<string, { width: number; height: number; bytes: number }>();
+      for (const ref of textureAssetRefs) {
+        const payload = textureByAssetRef.get(ref);
+        if (payload) {
+          textureMetaByAssetRef.set(ref, {
+            width: payload.width,
+            height: payload.height,
+            bytes: payload.bytes.length,
+          });
+        }
+      }
+
       const resolveRows = (assetRef: string) => {
         const collected = spriteRowsByAssetRef.get(assetRef) ?? [];
         if (collected.length === 0) {
@@ -321,6 +396,7 @@ export async function runExportPipeline(
               ancestorNamesUpToFrame: [] as const,
               frameName: firstFrame.name,
               frameId: firstFrame.id,
+              spriteId: null,
             },
           ];
         }
@@ -339,6 +415,7 @@ export async function runExportPipeline(
               ancestorNamesUpToFrame: [] as const,
               frameName: r.frameName,
               frameId: r.frameId,
+              spriteId: r.spriteId,
             };
           }
           return {
@@ -347,6 +424,7 @@ export async function runExportPipeline(
             ancestorNamesUpToFrame: collectAncestorNamesUpToFrame(gn, r.frameId),
             frameName: r.frameName,
             frameId: r.frameId,
+            spriteId: r.spriteId,
           };
         });
       };
@@ -357,6 +435,9 @@ export async function runExportPipeline(
         policy: 'frame_then_naming',
         generatedAt: ir.generatedAt,
         manualByExportNodeId: manualTextureGroupByExportNodeId,
+        textureMetaByAssetRef,
+        frames: ir.frames.map((f) => ({ frameId: f.id, frameName: f.name })),
+        exportNodeAudit,
         resolveRows,
       });
 
