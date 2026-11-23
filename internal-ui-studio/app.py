@@ -56,12 +56,12 @@ def wire_plan(raw,assets,width=None,height=None):
     plan=validate_plan(raw,{a["id"] for a in assets})
     if width and plan["width"]!=width or height and plan["height"]!=height:
         raise ValueError("方案画布与参考图或指定尺寸不一致。")
-    by={a["id"]:a["kind"] for a in assets}
+    by={a["id"]:a for a in assets}
     for n in plan["nodes"]:
-        if "assetId" in n and by.get(n["assetId"])!="image":
+        if "assetId" in n and by[n["assetId"]]["kind"]!="image":
             raise ValueError("贴图节点必须引用图片。")
-        if "fontAssetId" in n and by.get(n["fontAssetId"])!="font":
-            raise ValueError("文本字体必须引用已导入的字体。")
+        if "fontAssetId" in n and by[n["fontAssetId"]]["mime"]!="font/ttf":
+            raise ValueError("Creator 3.8.8 导出的 Label 请绑定 TTF 字体，或使用系统字体。")
     return plan
 
 class Studio:
@@ -118,7 +118,7 @@ class Studio:
         context={
             "screen":job["name"],"has_reference":bool(job["reference"]),
             "width":job["spec"]["width"],"height":job["spec"]["height"],
-            "assets":[{k:a[k] for k in ("id","name","width","height","kind","tags")} for a in assets],
+            "assets":[{k:a[k] for k in ("id","name","width","height","kind","tags")} for a in assets if a["kind"]!="font" or a["mime"]=="font/ttf"],
             "contract":PLAN_INSTRUCTIONS}
         plan=analyze(cfg["baseUrl"],cfg["key"],cfg["model"],images,context)
         return wire_plan(plan,assets,context["width"],context["height"])
@@ -307,7 +307,7 @@ class Handler(BaseHTTPRequestHandler):
         except ImportError:raise AppError("Cocos 导出阶段尚未安装。",501) from None
         pid=project["id"]
         assets={a["id"]:a for a in self.store.assets(pid)}
-        data=build_zip(project,jobs,assets,lambda aid:self.store.asset_bytes(pid,aid)[1])
+        data=build_zip(project,jobs,assets,lambda aid:self.store.asset_bytes(pid,aid)[1],include_all_assets=(mode=="project"))
         return self.write(200,data,"application/zip",[("Content-Disposition",f'attachment; filename="ui-studio-{mode}.zip"')])
 
 def serve():
