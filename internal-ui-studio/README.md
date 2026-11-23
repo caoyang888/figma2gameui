@@ -4,18 +4,15 @@
 
 ## 本地启动
 
-Python 3.12。只在自己的开发机器上运行：
+需要 Node.js 24 和 npm，不需要 Python。只在自己的开发机器上运行：
 
 ```sh
 cd internal-ui-studio
-python3 -m venv .venv
-. .venv/bin/activate
-pip install -r requirements.txt
-export F2_DEV_LOCAL=1
-# 填部署方允许的、已审查的 OpenAI 兼容 HTTPS API 根地址；可用逗号分隔多个。
-export F2_ALLOWED_AI_BASE_URLS='https://api.openai.com/v1'
-python3 app.py
+npm ci
+F2_DEV_LOCAL=1 F2_ALLOWED_AI_BASE_URLS=https://api.openai.com/v1 npm start
 ```
+
+在 Mac 上可先用 `node -v` 确认是 `v24.x`。用 Homebrew 时，`brew install node@24` 后可执行 `export PATH="$(brew --prefix node@24)/bin:$PATH"`。首次安装依赖需要联网，之后重新启动无需再执行 `npm ci`。如果已有 Python 版数据：停掉旧服务，先备份整个 `studio-data`（包括 SQLite、素材与 `settings.key`），再启动新版。自定义过 `F2_DATA_DIR` 时沿用同一路径。不要同时启动两个版本。
 
 在同机浏览器打开 `http://127.0.0.1:8765/`。没有配置允许地址时，应用仍可启动，但所有模型服务请求会被拒绝。设置页填写根地址和 API Key，拉取列表或直接输入模型 ID，再点「验证并设为默认」。切换型号会重新发两张随机合成图；必须能读取形状颜色和位置、返回有效结构、模型标识与请求相符。只拉取列表不算通过。首次在允许的真实提供方上测试时，请确认提供方协议兼容 `/models`（可选）与图像 `/chat/completions`、JSON 响应及 max_tokens。用合成图先测，不必上传公司素材验证。
 
@@ -37,9 +34,9 @@ python3 app.py
 ## 回归
 
 ```sh
-python3 -m unittest discover -s tests -v
-node --check web/app.js  # 可选 JS 语法核验
-python3 sample_pack.py /tmp/ui-studio-creator-smoke.zip
+npm run typecheck
+npm test
+npm run sample -- /tmp/ui-studio-creator-smoke.zip
 ```
 
 回归覆盖真实 HTTP API 的导入、审查、重复分析复用、单界面与项目 ZIP，以及注入模拟提供方的模型验证。没有提供方的真实 Key、公司素材、安装引擎的测试机时不能声称完成生产验收。Creator 验收步骤见 [CREATOR_ACCEPTANCE.md](CREATOR_ACCEPTANCE.md)。

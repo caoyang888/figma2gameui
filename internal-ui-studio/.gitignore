@@ -1,5 +1,4 @@
-__pycache__/
-.venv/
+node_modules/
 .env
 studio-data/
 *.sqlite
