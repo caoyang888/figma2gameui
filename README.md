@@ -1,6 +1,7 @@
-约定
-1. 预制体根节点必须为 Frame 类型。
-2. 需要导出图片的节点，需要手动标记 Export 属性。同时子节点如果也带有 Export 属性，该子节点的内容会独立渲染，并从父节点剔除。
-3. 需要自动布局，也就是需要导出后自动创建 Widget 组件的节点，必须为 Frame 类型。
-4. 当文本标记 Export 属性时，会导出为 Label 组件，否则会跟随父节点渲染为图片。
-5. Label 组件建议手动填写uuid关联。
+# 公司内部 UI 制作台
+
+按项目管理切图、字体和参考图，使用经过识图校验的模型分析界面结构，人工确认后导出 Cocos Creator 3.8.8 预制体与资源包。
+
+- [启动、部署与回归测试](internal-ui-studio/README.md)
+- [实现范围与验收条件](internal-ui-studio/PLAN.md)
+- [Creator 3.8.8 导入验收](internal-ui-studio/CREATOR_ACCEPTANCE.md)
