@@ -1,0 +1,8 @@
+__pycache__/
+.venv/
+.env
+studio-data/
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+*.zip

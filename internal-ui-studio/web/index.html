@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>UI 工坊 · 游戏界面整理</title>
+<link rel="stylesheet" href="/styles.css">
+<script defer src="/app.js"></script>
+</head>
+<body>
+<header class="topbar">
+  <button class="brand" id="brand" type="button"><span class="logo" aria-hidden="true"></span><span>UI 工坊 <small>游戏界面整理</small></span></button>
+  <nav aria-label="主导航"><button class="nav active" id="nav-projects" type="button">项目</button><button class="nav" id="nav-settings" type="button">模型设置</button></nav>
+  <span class="status-pill" id="settings-pill">检查模型…</span>
+</header>
+<main id="app" tabindex="-1"></main>
+<div id="notice" class="notice" aria-live="polite"></div>
+<template id="workspace-template">
+<div class="workspace">
+<aside class="project-sidebar" aria-label="项目列表">
+<div class="sidebar-head"><h2>工作台</h2><button class="icon-button" type="button" id="new-project" aria-label="新建项目" title="新建项目">＋</button></div>
+<form id="new-project-form" class="new-project-form" hidden><label for="project-name">项目名称</label><input id="project-name" name="name" placeholder="例如：游戏大厅" maxlength="80" required><button class="primary" type="submit">创建项目</button></form>
+<ul id="project-list" class="project-list"></ul>
+</aside>
+<section class="content" id="content"></section>
+</div>
+</template>
+<template id="settings-template">
+<section class="settings">
+  <p class="eyebrow">工作台 / 设置</p><h1>模型设置</h1>
+  <p class="lede">先获取模型列表，再选择默认模型。只有实际验证通过的配置才会保存。</p>
+  <div class="panel">
+    <h2>模型服务</h2><p class="small muted" id="saved-setting" role="status">正在读取当前设置…</p>
+    <form id="settings-form" class="settings-form" autocomplete="off">
+      <label for="base-url">服务地址</label><input id="base-url" name="baseUrl" type="url" required placeholder="https://你的服务地址/v1" spellcheck="false">
+      <label for="api-key">API Key</label><input id="api-key" name="apiKey" type="password" placeholder="已有连接可留空复用；新地址请填写" autocomplete="new-password" spellcheck="false">
+      <small class="muted">只在验证请求中提交。本页不会回显或持久保存在浏览器中。</small>
+      <button id="load-models" class="secondary" type="button">获取模型列表</button>
+      <label for="model-id">默认模型</label><input id="model-id" name="model" list="model-options" required maxlength="200" placeholder="从列表选，或手动填写模型 ID" spellcheck="false"><datalist id="model-options"></datalist>
+      <div class="actions"><button id="save-model" type="submit" class="primary">验证并设为默认</button></div>
+      <p id="settings-error" class="inline-error" role="alert" hidden></p>
+    </form>
+  </div>
+</section>
+</template>
+</body>
+</html>
