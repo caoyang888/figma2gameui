@@ -241,6 +241,8 @@ class Handler(BaseHTTPRequestHandler):
                     raise AppError("模型未通过真实识图验证。")
                 self.store.set_model(url,key,model)
             return self.json(self.store.settings())
+        if method=="GET" and path=="/api/jobs":
+            return self.json({"jobs":self.store.recent_tasks()})
         if path=="/api/projects":
             if method=="GET":return self.json({"projects":self.store.projects()})
             return self.json(self.store.create_project(self.body().get("name")),201)

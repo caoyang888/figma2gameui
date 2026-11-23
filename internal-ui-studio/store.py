@@ -191,6 +191,14 @@ class Store:
         with self.db() as d:
             return [self.job_row(r) for r in d.execute("SELECT id,project,name,status,plan,error,created,updated,attempt,reference IS NOT NULL AS has_reference FROM jobs WHERE project=? ORDER BY created DESC",(pid,))]
 
+    def recent_tasks(self):
+        with self.db() as d:
+            rows=d.execute("""SELECT j.id,j.project,j.name,j.status,j.error,j.updated,p.name AS projectName
+                    FROM jobs j JOIN projects p ON j.project=p.id
+                    ORDER BY j.updated DESC,j.id LIMIT 100""").fetchall()
+        return [{"id":r["id"],"projectId":r["project"],"projectName":r["projectName"],"name":r["name"],
+                 "status":r["status"],"updatedAt":r["updated"]} for r in rows]
+
     def reset_interrupted(self):
         with self.db() as d:
             d.execute("""UPDATE jobs SET status='failed',error=?,updated=? WHERE status='running'""",

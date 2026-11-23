@@ -21,7 +21,7 @@ const failed = (job) => ['failed','error','cancelled'].includes(job?.status);
 const approved = (job) => ['approved','exported'].includes(job?.status);
 const nameOf = (entry, fallback = '未命名') => entry?.name || entry?.filename || fallback;
 const elapsed = (size) => typeof size === 'number' ? (size < 1024 ? size + ' B' : size < 1048576 ? (size/1024).toFixed(1) + ' KB' : (size/1048576).toFixed(1) + ' MB') : '';
-const imageFile = (asset) => String(asset?.mimeType || asset?.contentType || '').startsWith('image/') || /\.(png|jpe?g|webp|gif|avif)$/i.test(nameOf(asset, ''));
+const imageFile = (asset) => String(asset?.mime || asset?.mimeType || asset?.contentType || '').startsWith('image/') || /\.(png|jpe?g|webp|gif|avif)$/i.test(nameOf(asset, ''));
 const array = (payload,key) => Array.isArray(payload) ? payload : Array.isArray(payload?.[key]) ? payload[key] : [];
 const dup = (value) => value == null ? null : JSON.parse(JSON.stringify(value));
 const errText = (error, fallback = '暂时无法完成，请重试。') => typeof error === 'string' && error ? error : typeof error?.message === 'string' ? error.message : fallback;
@@ -79,10 +79,11 @@ function asyncClick(btn, run) {
   };
 }
 function refreshNav() {
-  $('nav-projects').classList.toggle('active',state.page==='projects');
-  $('nav-settings').classList.toggle('active',state.page==='settings');
-  $('nav-projects').setAttribute('aria-current',state.page==='projects'?'page':'false');
-  $('nav-settings').setAttribute('aria-current',state.page==='settings'?'page':'false');
+  for (const name of ['projects','tasks','settings']) {
+    const b=$('nav-'+name), active=state.page===name;
+    b.classList.toggle('active',active);
+    b.setAttribute('aria-current',active?'page':'false');
+  }
 }
 function setSettingsPill(settings) {
   const p = $('settings-pill');
@@ -98,6 +99,7 @@ function showPage(page) {
   state.page = page;
   const rev = ++state.revision;
   refreshNav();
+  if (page === 'tasks') return mountTasks(rev);
   app.replaceChildren($((page === 'settings' ? 'settings' : 'workspace') + '-template').content.cloneNode(true));
   if (page === 'settings') return mountSettings(rev);
   const form = $('new-project-form');
@@ -115,6 +117,28 @@ function showPage(page) {
   }));
   $('content').replaceChildren(muted('正在读取项目…'));
   return loadWorkspace(rev,state.projectId);
+}
+async function mountTasks(rev) {
+  const block=el('section',{class:'settings'},
+    el('p',{class:'eyebrow'},'工作台 / 任务'),el('h1',{},'最近的处理任务'),
+    el('p',{class:'lede'},'查看各项目最近 100 条任务，不用逐个打开。'));
+  const panel=el('div',{class:'panel'},muted('正在读取任务…'));
+  block.append(el('div',{class:'actions'},button('刷新',()=>mountTasks(rev))),panel);
+  app.replaceChildren(block);
+  try {
+    const result=await request('/api/jobs');
+    if (state.page!=='tasks'||state.revision!==rev||!panel.isConnected) return;
+    const jobs=array(result,'jobs');
+    if (!jobs.length) {panel.replaceChildren(empty('当前没有任务。'));return;}
+    panel.replaceChildren(...jobs.map(j=>{
+      const open=button('打开任务',async()=>{
+        state.projectId=j.projectId;
+        await showPage('projects');
+        if (state.page==='projects'&&state.projectId===j.projectId&&state.detail) selectJob(j.id,true);
+      });
+      return el('div',{class:'task-row'},el('div',{},el('strong',{},nameOf(j)),muted(j.projectName||'项目')),pill(j),open);
+    }));
+  } catch(e) {if(panel.isConnected)panel.replaceChildren(empty(errText(e)));}
 }
 async function loadWorkspace(rev, chosen) {
   try {
@@ -188,8 +212,10 @@ function renderProjectContent() {
       el('section',{class:'panel'},el('div',{class:'pane-head'},el('h2',{},'处理任务'),el('span',{id:'job-count',class:'muted small'},count+' 个')),
         el('div',{id:'jobs-list'}))),
       el('section',{class:'panel'},el('div',{class:'pane-head'},el('h2',{},'素材库'),el('span',{id:'asset-count',class:'muted small'})),
-        el('p',{class:'muted small'},'查看和下载这个项目中已导入的素材。'),el('div',{id:'assets-list'}))),
+        el('p',{class:'muted small'},'查看和下载这个项目中已导入的素材。'),
+        el('div',{class:'asset-search'},el('label',{for:'asset-search'},'搜索素材'),el('input',{id:'asset-search',type:'search',placeholder:'按文件名或标签搜索'})),el('div',{id:'assets-list'}))),
     review);
+  $('asset-search').addEventListener('input',renderAssets);
   renderJobs(); renderAssets();
   const submit = $('submit-job');
   form.addEventListener('submit',asyncClick(submit,async () => {
@@ -252,14 +278,23 @@ function renderJobs() {
 }
 function renderAssets() {
   const box=$('assets-list'); if (!box) return;
-  const all=array(state.detail,'assets'); $('asset-count').textContent=all.length+' 个';
+  const all=array(state.detail,'assets');
+  const query=($('asset-search')?.value||'').trim().toLocaleLowerCase('zh-CN');
+  const tags=(a)=>Array.isArray(a.tags)?a.tags:[];
+  const matching=query?all.filter(a=>[nameOf(a),...tags(a)].some(x=>String(x).toLocaleLowerCase('zh-CN').includes(query))):all;
+  $('asset-count').textContent=query?(matching.length+' / '+all.length+' 个'):(all.length+' 个');
   if (!all.length) {box.replaceChildren(empty('暂时没有素材。'));return;}
-  box.replaceChildren(el('ul',{class:'asset-list'},all.map(a=>{
+  if (!matching.length) {box.replaceChildren(empty('没有匹配的素材。试试其他名称或标签。'));return;}
+  box.replaceChildren(el('ul',{class:'asset-list'},matching.map(a=>{
     const href=links.asset(state.projectId,a.id);
     const image=imageFile(a)?el('img',{class:'thumb',src:href,alt:'',loading:'lazy'}):el('span',{class:'file-kind'},nameOf(a,'').split('.').at(-1).slice(0,8).toUpperCase()||'文件');
-    return el('li',{},el('div',{class:'asset-details'},image,el('div',{},el('div',{},nameOf(a)),el('div',{class:'muted small'},elapsed(a.size??a.byteLength)))),
+    const uses=Array.isArray(a.usedBy)?a.usedBy.length:null;
+    const more=el('div',{class:'muted small'},[elapsed(a.size??a.byteLength),uses==null?null:('用于 '+uses+' 个任务')].filter(Boolean).join(' · '));
+    const labels=tags(a).length?el('div',{class:'asset-tags'},tags(a).slice(0,8).map(t=>el('span',{class:'file-kind'},String(t)))):null;
+    return el('li',{},el('div',{class:'asset-details'},image,el('div',{},el('div',{},nameOf(a)),more,labels)),
       link('下载',href));
   })));
+
 }
 async function selectJob(id, focus) {
   clearTimeout(state.timer);
@@ -335,10 +370,14 @@ function renderReview() {
   else box.append(muted('先核对布局和素材，再决定是否批准。预览用于检查结构，不代表游戏引擎中的最终效果。'));
   const plan=state.draft;
   const previewArea=el('div',{class:'preview-outer'});
-  const side=el('div',{},el('h3',{},'预制体树'));
-  const nodeBox=el('div',{class:'node-info'});
+  const previewHead=el('div',{class:'pane-head'},el('h3',{},'界面预览'));
+  const treeDetails=el('details',{class:'node-details',id:'node-details'},el('summary',{},approved(job)?'查看节点结构':'调整节点与布局'));
+  const nodeBox=el('p',{class:'node-info'});
   const nodes=el('ul',{class:'node-list','aria-label':'节点列表'});
-  side.append(nodeBox,nodes);
+  const editor=el('div',{class:'node-editor',id:'node-editor'});
+  treeDetails.append(muted('可在画布上点选节点，也可以从列表中选择。'),el('div',{class:'node-grid'},nodes,el('div',{},nodeBox,editor)));
+  const byId=new Map(plan.nodes.map(n=>[n.id,n]));
+  let nodeDirty=false;
   const assets=array(state.detail,'assets');
   const refId=plan.referenceAssetId || job.referenceAssetId || job.reference?.assetId || job.reference?.id ||
     assets.find(a=>(a.role==='reference' || a.kind==='reference') && (a.jobId===job.id || !a.jobId))?.id;
@@ -352,13 +391,13 @@ function renderReview() {
       const reference=el('img',{src:refHref,class:'preview-ref',alt:'',hidden:!state.reference});
       toggle.checked=state.reference;
       toggle.addEventListener('change',()=>{state.reference=toggle.checked;reference.hidden=!state.reference;});
-      side.insertBefore(el('label',{class:'small muted',for:'show-reference'},toggle,' 叠加参考截图'),nodeBox);
+      previewHead.append(el('label',{class:'small muted',for:'show-reference'},toggle,' 叠加参考截图'));
       canvas.append(reference);
     }
     for (const node of plan.nodes) {
       const known=Object.prototype.hasOwnProperty.call(KIND,node.kind);
       const layer=el('button',{type:'button',class:'layer '+(known?node.kind:'unknown'),
-        'aria-label': nameOf(node,'未命名节点'),onclick:()=>chooseNode(node.id)});
+        'aria-label': nameOf(node,'未命名节点'),onclick:()=>pickNode(node.id)});
       const coords=[node.x,node.y,node.width,node.height].map(Number);
       if (coords.every(Number.isFinite)) {
         layer.style.left=(coords[0]/width*100)+'%';layer.style.top=(coords[1]/height*100)+'%';
@@ -375,13 +414,83 @@ function renderReview() {
     if (typeof ResizeObserver==='function') {previewObserver=new ResizeObserver(resize);previewObserver.observe(previewArea);}
     requestAnimationFrame(resize);
   } else previewArea.append(empty('画布宽高无效。请更正高级编辑器中的尺寸。'));
+  function pickNode(id) {
+    treeDetails.open=true;
+    if (nodeDirty && state.selection!==id) {notice('请先应用或撤销当前节点修改，再选择其他节点。',true);return;}
+    if (state.selection!==id || !editor.hasChildNodes()) chooseNode(id);
+  }
   function chooseNode(id) {
     state.selection=id;
-    for (const [k,l] of layers) l.classList.toggle('selected',k===id);
+    for (const [k,l] of layers) {l.classList.toggle('selected',k===id);l.setAttribute('aria-pressed',k===id?'true':'false');}
     for (const [k,r] of rows) {r.classList.toggle('selected',k===id);r.setAttribute('aria-pressed',k===id?'true':'false');}
-    const p = plan.nodes.find(n=>n.id===id);
-    nodeBox.textContent=p ? [nameOf(p), (KIND[p.kind]||p.kind),
-      '尺寸 '+p.width+' × '+p.height, '位置 '+p.x+', '+p.y, p.align ? '对齐 '+p.align : '', p.direction ? '排列 '+p.direction : '', Number.isFinite(p.gap)? '间距 '+p.gap : ''].filter(Boolean).join(' · ') : '点树上的节点，查看尺寸和位置。';
+    const n=byId.get(id);
+    nodeBox.textContent=n ? [nameOf(n), (KIND[n.kind]||n.kind),
+      '尺寸 '+n.width+' × '+n.height, '位置 '+n.x+', '+n.y, n.align ? '对齐 '+n.align : '', n.direction ? '排列 '+n.direction : '', Number.isFinite(n.gap)? '间距 '+n.gap : ''].filter(Boolean).join(' · ') : '选择一个节点，查看尺寸和位置。';
+    editor.replaceChildren();
+    nodeDirty=false;
+    if (n && !approved(job)) mountNodeEditor(n);
+  }
+  function mountNodeEditor(n) {
+    const form=el('form',{class:'form-grid'});
+    const field=(key,label,input)=>el('div',{},el('label',{for:'edit-node-'+key},label),input);
+    const input=(key,attributes)=>el('input',{id:'edit-node-'+key,...attributes});
+    const title=input('name',{value:n.name,maxlength:100,required:true});
+    const coords={x:['左边距 X',width,0],y:['顶边距 Y',height,0],width:['宽度',width,0],height:['高度',height,0]};
+    const coordInputs=Object.fromEntries(Object.entries(coords).map(([key,[,max,min]])=>
+      [key,input(key,{type:'number',step:'any',min,max,value:n[key],required:true,inputmode:'decimal'})]));
+    const permitted=plan.nodes.filter(p=>{
+      if (!['container','layout','button'].includes(p.kind)) return false;
+      const seen=new Set();
+      for (let x=p;x;x=byId.get(x.parentId)) {
+        if (x.id===n.id || seen.has(x.id)) return false;
+        seen.add(x.id);
+        if (x.parentId==null) return true;
+      }
+      return false;
+    });
+    const allowedParents=new Set(permitted.map(x=>x.id));
+    const parent=el('select',{id:'edit-node-parent',disabled:n.parentId==null},
+      n.parentId==null?el('option',{value:''},'根节点（不可更改父节点）'):null,
+      permitted.map(p=>el('option',{value:p.id},(p.parentId==null?'根节点 · ':'')+nameOf(p)+' ['+p.id+']')));
+    if (n.parentId!=null) parent.value=n.parentId;
+    form.append(field('name','节点名称',title),field('parent','所属父节点',parent),el('div',{class:'dimensions'},
+      Object.entries(coords).map(([key,[label]])=>field(key,label,coordInputs[key]))));
+    const canImage=['sprite','button'].includes(n.kind);
+    const canText=n.kind==='label';
+    const image=canImage?el('select',{id:'edit-node-image',required:n.kind==='sprite'},
+      el('option',{value:''},n.kind==='sprite'?'请选择图片':'不绑定图片'),
+      assets.filter(a=>imageFile(a) && a.role!=='reference' && a.kind!=='reference').map(a=>el('option',{value:a.id},nameOf(a)+' ['+a.id+']'))):null;
+    if (image) {image.value=n.assetId??'';form.append(field('image','绑定图片',image));}
+    const line=canText?el('textarea',{id:'edit-node-text',class:'node-text',rows:2,maxlength:4000}):null;
+    const font=canText?el('select',{id:'edit-node-font'},el('option',{value:''},'默认字体'),
+      assets.filter(a=>/\.ttf$/i.test(nameOf(a,''))||a.mime==='font/ttf').map(a=>el('option',{value:a.id},nameOf(a)+' ['+a.id+']'))):null;
+    if (line) {line.value=n.text??'';form.append(field('text','显示文字',line),muted('动态文字可以留空。'));}
+    if (font) {font.value=n.fontAssetId??'';form.append(field('font','绑定 TTF 字体',font));}
+    const warn=el('p',{class:'inline-error',role:'alert',hidden:true});
+    const apply=el('button',{type:'submit',class:'primary'},'应用到预览');
+    form.append(el('div',{class:'actions'},apply,button('撤销未应用修改',()=>chooseNode(n.id))),warn);
+    form.addEventListener('input',()=>{nodeDirty=true;});
+    form.addEventListener('change',()=>{nodeDirty=true;});
+    form.addEventListener('submit',(e)=>{
+      e.preventDefault();warn.hidden=true;
+      try {
+        if (jsonDirty) throw new Error('高级 JSON 有未应用的修改。请在高级编辑中更新预览，或放弃 JSON 修改。');
+        const name=title.value.trim();
+        if (!name) throw new Error('请输入节点名称。');
+        const values=Object.fromEntries(Object.entries(coordInputs).map(([k,f])=>[k,f.value===''?NaN:Number(f.value)]));
+        if (!Object.values(values).every(Number.isFinite)||values.x<0||values.y<0||values.width<=0||values.height<=0||
+            values.x+values.width>width+1e-9||values.y+values.height>height+1e-9) throw new Error('尺寸必须大于 0，节点不可超出画布。');
+        if (n.parentId!=null && !allowedParents.has(parent.value)) throw new Error('请选择不会形成循环的父节点。');
+        if (image && n.kind==='sprite' && !image.value) throw new Error('图像节点需要绑定图片。');
+        Object.assign(n,values,{name,parentId:n.parentId==null?null:parent.value});
+        if (image) {if (image.value) n.assetId=image.value;else delete n.assetId;}
+        if (line) n.text=line.value;
+        if (font) {if (font.value) n.fontAssetId=font.value;else delete n.fontAssetId;}
+        renderReview();$('node-details').open=true;$('node-editor').querySelector('input')?.focus({preventScroll:true});
+        notice('预览已更新。批准后才会保存为导出方案。');
+      } catch (error) {warn.textContent=errText(error);warn.hidden=false;}
+    });
+    editor.append(form);
   }
   const children=new Map(); const ids=new Set(plan.nodes.map(n=>n.id)); const visited=new Set();
   for (const n of plan.nodes) {
@@ -392,7 +501,7 @@ function renderReview() {
   const renderNode=(n,d)=>{
     if (visited.has(n.id)) return;
     visited.add(n.id);
-    const b=el('button',{type:'button',class:'node-link',onclick:()=>chooseNode(n.id),'aria-pressed':'false'},el('span',{},nameOf(n)),
+    const b=el('button',{type:'button',class:'node-link',onclick:()=>pickNode(n.id),'aria-pressed':'false'},el('span',{},nameOf(n)),
       el('span',{class:'small muted'},KIND[n.kind]||n.kind));
     b.style.paddingLeft=(10+Math.min(d,10)*15)+'px';
     nodes.append(el('li',{},b));rows.set(n.id,b);
@@ -401,7 +510,7 @@ function renderReview() {
   for (const n of children.get(null)||[]) renderNode(n,0);
   for (const n of plan.nodes) renderNode(n,0);
   chooseNode(state.selection);
-  box.append(el('div',{class:'preview-grid'},previewArea,side));
+  box.append(el('section',{class:'preview-section'},previewHead,previewArea));
   const issueList=el('ul',{class:'issues'});
   const issues=Array.isArray(plan.issues)?plan.issues:[];
   const reviewedMark='［已复核］';
@@ -421,7 +530,7 @@ function renderReview() {
       li.append(suggest);
       if (!approved(job) && !isMarked(item.resolution)) {
         const choose=button(blocked?'确认采用替代方式，解除阻塞':'标记建议已复核',()=>{
-          if (jsonDirty) {notice('请先更新 JSON 预览，再操作建议。',true);return;}
+          if (nodeDirty || jsonDirty) {notice('请先应用或撤销未完成的修改，再操作建议。',true);return;}
           const mark=blocked ? acceptedMark : reviewedMark;
           item.resolution=mark+Array.from(item.resolution).slice(0,600-mark.length).join('');
           if (blocked) item.severity='warning';
@@ -432,10 +541,11 @@ function renderReview() {
     } else if (item.severity==='error') li.append(muted('请在高级编辑中修订结构和这条问题，再更新预览。'));
     issueList.append(li);
   });
-  box.append(el('section',{},el('h3',{},'待核对问题'),issues.length?issueList:muted('未列出待核对问题。')));
+  box.append(el('section',{class:'review-issues'},el('h3',{},'待核对问题'),issues.length?issueList:muted('未列出待核对问题。')),treeDetails);
+  if (state.selection!=null) treeDetails.open=true;
   const error=el('p',{class:'inline-error',role:'alert',hidden:true});
   const details=el('details',{},el('summary',{},approved(job)?'查看结构 JSON':'高级：编辑结构 JSON'),
-    muted(approved(job)?'这是已批准的节点数据。':'采纳建议只记录复核结果。要改位置、尺寸或层级，请在 JSON 中修改，再更新预览。'),advanced);
+    muted(approved(job)?'这是已批准的节点数据。':'常用调整可直接在「调整节点与布局」中完成。只有更复杂的改动才需要编辑 JSON。'),advanced);
   function candidateFromEditor() {
     let value;try{value=JSON.parse(advanced.value);}catch{throw new Error('结构 JSON 格式有误，请检查标点和括号。');}
     if (!(value && Number.isFinite(value.width) && value.width>0 && Number.isFinite(value.height) && value.height>0 && Array.isArray(value.nodes) && Array.isArray(value.issues)))
@@ -448,12 +558,18 @@ function renderReview() {
   }
   const commitActions=el('div',{class:'actions'});
   if (!approved(job)) {
-    const renderButton=button('更新预览',()=>{try{state.draft=candidateFromEditor();renderReview();$('job-review').querySelector('details').open=true;}catch(e){error.textContent=errText(e);error.hidden=false;}});
-    details.append(el('div',{class:'actions'},renderButton));
+    details.id='advanced-review';
+    const renderButton=button('更新预览',()=>{try{
+      if (nodeDirty) throw new Error('请先应用或撤销当前节点修改。');
+      state.draft=candidateFromEditor();renderReview();$('advanced-review').open=true;
+    }catch(e){error.textContent=errText(e);error.hidden=false;}});
+    const resetButton=button('放弃 JSON 修改',()=>{advanced.value=JSON.stringify(plan,null,2);jsonDirty=false;error.hidden=true;});
+    details.append(el('div',{class:'actions'},renderButton,resetButton));
     const approve=button('批准并允许导出',()=>{},'primary');
     approve.addEventListener('click',asyncClick(approve,async()=>{
       error.hidden=true;
       try {
+        if (nodeDirty) throw new Error('你修改了节点。请先点「应用到预览」，核对后再批准。');
         if (jsonDirty) throw new Error('你编辑了 JSON。请先点「更新预览」，核对后再批准。');
         const value=candidateFromEditor();const token=state.jobRequest;const pid=state.projectId;
         if (value.issues.some(x=>x.severity==='error')) throw new Error('还有阻塞问题。请先修订结构，或明确接受对应替代方式。');
@@ -533,6 +649,7 @@ function mountSettings(rev) {
 }
 $('brand').addEventListener('click',()=>showPage('projects'));
 $('nav-projects').addEventListener('click',()=>{if(state.page!=='projects')showPage('projects');});
+$('nav-tasks').addEventListener('click',()=>{if(state.page!=='tasks')showPage('tasks');});
 $('nav-settings').addEventListener('click',()=>{if(state.page!=='settings')showPage('settings');});
 request('/api/settings').then(setSettingsPill).catch(()=>setSettingsPill(null));
 showPage('projects');

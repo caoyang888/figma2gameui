@@ -10,7 +10,7 @@
 <body>
 <header class="topbar">
   <button class="brand" id="brand" type="button"><span class="logo" aria-hidden="true"></span><span>UI 工坊 <small>游戏界面整理</small></span></button>
-  <nav aria-label="主导航"><button class="nav active" id="nav-projects" type="button">项目</button><button class="nav" id="nav-settings" type="button">模型设置</button></nav>
+  <nav aria-label="主导航"><button class="nav active" id="nav-projects" type="button">项目</button><button class="nav" id="nav-tasks" type="button">任务</button><button class="nav" id="nav-settings" type="button">模型设置</button></nav>
   <span class="status-pill" id="settings-pill">检查模型…</span>
 </header>
 <main id="app" tabindex="-1"></main>
@@ -28,7 +28,7 @@
 <template id="settings-template">
 <section class="settings">
   <p class="eyebrow">工作台 / 设置</p><h1>模型设置</h1>
-  <p class="lede">先获取模型列表，再选择默认模型。只有实际验证通过的配置才会保存。</p>
+  <p class="lede">可从列表选或手填模型 ID。只有通过合成图识别测试的配置才会保存。</p>
   <div class="panel">
     <h2>模型服务</h2><p class="small muted" id="saved-setting" role="status">正在读取当前设置…</p>
     <form id="settings-form" class="settings-form" autocomplete="off">

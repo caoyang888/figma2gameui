@@ -105,6 +105,9 @@ class TestStudio(unittest.TestCase):
         self.assertEqual(analyzer.call_count,1)
         self.assertEqual(self.req("/api/jobs/"+jid+"/approve",{"plan":result["plan"]})[0],200)
         self.assertEqual(len(self.req("/api/jobs/"+jid+"/revisions")[1]["revisions"]),2)
+        recent=self.req("/api/jobs")[1]["jobs"]
+        self.assertEqual((recent[0]["id"],recent[0]["projectId"],recent[0]["status"]),(jid,pid,"approved"))
+        self.assertNotIn("plan",recent[0])
         self.assertEqual(self.req("/api/jobs/"+jid+"/approve",{"plan":result["plan"]})[0],400)
         self.assertEqual(self.req(p)[1]["assets"][0]["tags"],["图标"])
         other=self.req(p+"/jobs",{**body,"name":"第二界面","files":[{"name":"letter.png","content":png(13,12)}]})[1]
